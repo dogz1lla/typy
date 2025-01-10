@@ -22,9 +22,9 @@ TODO:
 - [x] print stats on game over;
 - [x] write a line wrapping logic, tie it to the screen dimension;
 - [ ] center all the gui elements;
-- [ ] check if using the plain Text widget for the entire word box is better;
 - [ ] restart button;
 - [x] add wpm to the stats;
+- [ ] print stats in an overlay widget;
 """
 import urwid
 import typing
@@ -107,9 +107,9 @@ def get_word_matrix(words: list[str], color_map: list[list[str]], box_dim: tuple
     return [get_line_widget(line, cm) for line, cm in zip(l1, l2)]
 
 
-def get_gui(word_box, input_field, button_inst) -> urwid.Widget:
+def get_gui(stats_table, word_box, input_field, button_inst) -> urwid.Widget:
     div = urwid.Divider()
-    pile = urwid.Pile([word_box, div, input_field, div, button_inst])
+    pile = urwid.Pile([stats_table, word_box, div, input_field, div, button_inst])
     top = urwid.Filler(pile)
     return top
 
@@ -213,12 +213,34 @@ def update_word_mask(
     return word_mask
 
 
+def get_stats_widget(stats: dict = {}) -> urwid.Pile:
+    """Stats to display: chars stats (all, correct, %), word stats (all, correct, %), wpm."""
+    n_chars = stats['n_chars'] if 'n_chars' in stats else ''
+    n_chars_correct = stats['n_correct_chars'] if 'n_correct_chars' in stats else ''
+    n_chars_correct_pct = stats['correct_chars_pct'] if 'correct_chars_pct' in stats else ''
+    n_words = stats['n_words'] if 'n_words' in stats else ''
+    n_words_correct = stats['n_correct_words'] if 'n_correct_words' in stats else ''
+    n_words_correct_pct = stats['correct_words_pct'] if 'correct_words_pct' in stats else ''
+    wpm = stats['wpm'] if 'wpm' in stats else ''
+
+    char_stats = urwid.Columns([
+        (22, urwid.Text(f"chars: {n_chars_correct}/{n_chars} ({n_chars_correct_pct}%)")),
+    ])
+    word_stats = urwid.Columns([
+        (22, urwid.Text(f"words: {n_words_correct}/{n_words} ({n_words_correct_pct}%)")),
+    ])
+    wpm = urwid.Columns([
+        (10, urwid.Text(f"wpm: {wpm}")),
+    ])
+    return urwid.Pile([char_stats, word_stats, wpm])
+
+
 def main() -> None:
-    from random import choice
-    NUM_WORDS = 50
-    WORDS = [choice(VOCAB) for _ in range(NUM_WORDS)]
-    # WORDS = ["hi", "bye", "wee"]
-    # WORDS = ["aaaaaa", "bbbb"]
+    def get_word_list(n: int) -> list[str]:
+        from random import choice
+        return [choice(VOCAB) for _ in range(n)]
+        # return ["hi", "bye", "wee"]
+        # return ["aaaaaa", "bbbb"]
 
     def exit_on_q(key: str) -> None:
         if key in {"q", "Q"}:
@@ -228,16 +250,26 @@ def main() -> None:
         raise urwid.ExitMainLoop()
 
     def on_input_change_closure(words, screen_dim):
-        app_state = dict(
-            cursor_pos=(0, -1),
-            last_valid_char="",
-            last_char="",
-            word_mask=init_word_mask(words),
-            typed_so_far="",
-            colors=None,
-            game_start_time=None,
-        )
-        def on_input_change(_edit: urwid.Edit, new_edit_text: str, word_widget: urwid.Pile) -> None:
+        # app_state = dict(
+        #     cursor_pos=(0, -1),
+        #     word_mask=init_word_mask(words),
+        #     typed_so_far="",
+        #     colors=None,
+        #     game_start_time=None,
+        # )
+
+        def _clean_state(state: dict, word_list: Optional[list[str]] = None) -> dict:
+            state["cursor_pos"] = (0, -1)
+            state["words"] = word_list or words
+            state["word_mask"] = init_word_mask(state["words"])
+            state["typed_so_far"] = ""
+            state["colors"] = None
+            state["game_start_time"] = None
+
+        app_state = dict()
+        _clean_state(app_state)
+
+        def on_input_change(_edit: urwid.Edit, new_edit_text: str, word_widget: urwid.Pile, stats_widget: urwid.Pile) -> None:
             """Redraw screen on user input."""
             if app_state["game_start_time"] is None and app_state["cursor_pos"][0] == 0:
                 # we are at the beginning of the game -> start timer
@@ -252,13 +284,13 @@ def main() -> None:
 
                 # NOTE: this call wont raise the game over exception because this if branch does not
                 # advance the word_idx
-                new_word_mask = update_word_mask(words, app_state["word_mask"], new_cursor_pos, "")
+                new_word_mask = update_word_mask(app_state["words"], app_state["word_mask"], new_cursor_pos, "")
                 app_state["word_mask"] = new_word_mask
 
                 new_colors = get_colors(new_word_mask, new_cursor_pos)
                 app_state["colors"] = new_colors
 
-                new_word_matrix = get_word_matrix(words, new_colors, screen_dim)
+                new_word_matrix = get_word_matrix(app_state["words"], new_colors, screen_dim)
                 word_widget.contents = [(w, word_widget.options()) for w in new_word_matrix]
                 return
 
@@ -287,16 +319,24 @@ def main() -> None:
             app_state["typed_so_far"] = new_edit_text
 
             try:
-                new_word_mask = update_word_mask(words, app_state["word_mask"], new_cursor_pos, last_char)
+                new_word_mask = update_word_mask(app_state["words"], app_state["word_mask"], new_cursor_pos, last_char)
             except GameOverException as e:
-                raise GameOverException(e.word_mask, app_state["game_start_time"])
+                # raise GameOverException(e.word_mask, app_state["game_start_time"])
+                final_word_mask = e.word_mask
+                stats = _get_stats_from_word_mask(final_word_mask)
+                wpm = int(round(60.0 * NUM_WORDS / (time.time() - app_state["game_start_time"]), 0))
+                stats["wpm"] = wpm
+                stats_widget.contents = [(get_stats_widget(stats), stats_widget.options())]
+                new_words = get_word_list(len(app_state["words"]))
+                _clean_state(app_state, new_words)
+                return
 
             app_state["word_mask"] = new_word_mask
 
             new_colors = get_colors(new_word_mask, new_cursor_pos)
             app_state["colors"] = new_colors
 
-            new_word_matrix = get_word_matrix(words, new_colors, box_dim=screen_dim)
+            new_word_matrix = get_word_matrix(app_state["words"], new_colors, box_dim=screen_dim)
             word_widget.contents = [(w, word_widget.options()) for w in new_word_matrix]
             return
         return on_input_change
@@ -315,11 +355,14 @@ def main() -> None:
         return dict(
             n_chars=n_chars,
             n_correct_chars=n_correct_chars,
-            correct_chars_pct=round(100*n_correct_chars/n_chars, 0),
+            correct_chars_pct=int(round(100*n_correct_chars/n_chars, 0)),
             n_words=n_words,
             n_correct_words=n_correct_words,
-            correct_words_pct=round(100*n_correct_words/n_words, 0),
+            correct_words_pct=int(round(100*n_correct_words/n_words, 0)),
         )
+
+    NUM_WORDS = 5
+    WORDS = get_word_list(NUM_WORDS)
 
     # init application loop
     # NOTE: need to do it before everything else to have access to the screen dimensions
@@ -328,6 +371,8 @@ def main() -> None:
     word_box_dim = (screen_dim[0] - 4, screen_dim[1])
 
     # widgets
+    ## stats
+    stats_widget = get_stats_widget()
     ## word box
     init_colors = get_colors(init_word_mask(WORDS), (0, -1))
     word_matrix = get_word_matrix(WORDS, init_colors, word_box_dim)
@@ -339,12 +384,12 @@ def main() -> None:
     ## exit button
     button_inst = urwid.Button("Exit")
     ## top level widget
-    top = get_gui(word_box, input_field_box, button_inst)
+    top = get_gui(stats_widget, word_box, input_field_box, button_inst)
     app = urwid.LineBox(top)
 
     # events
     on_input_change = on_input_change_closure(WORDS, word_box_dim)
-    urwid.connect_signal(input_field, "change", partial(on_input_change, word_widget=word_widget))
+    urwid.connect_signal(input_field, "change", partial(on_input_change, word_widget=word_widget, stats_widget=stats_widget))
     urwid.connect_signal(input_field, "postchange", clear_if_space)
     urwid.connect_signal(button_inst, "click", on_exit_clicked)
 
@@ -352,16 +397,7 @@ def main() -> None:
     loop.widget = app
 
     # run application loop
-    try:
-        loop.run()
-    except GameOverException as e:
-        final_word_mask = e.word_mask
-        stats = _get_stats_from_word_mask(final_word_mask)
-        msg = "Game over\n" + "-"*10 + "\nStats:\n" + "\n".join([f"{k}={v}" for k, v in stats.items()])
-        # time average
-        wpm = round(60.0 * NUM_WORDS / (time.time() - e.start_time), 0)
-        msg += f"\nwpm={wpm}"
-        print(msg)
+    loop.run()
 
 
 if __name__ == "__main__":
