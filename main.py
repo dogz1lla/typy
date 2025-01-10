@@ -44,10 +44,10 @@ PALETTE: list[tuple[str, str, str]] = [
     (LetterStatus.CORRECT, "dark green", ""),
     (LetterStatus.WRONG, "dark red", ""),
     (LetterStatus.DEFAULT, "light gray", ""),
-    (LetterStatus.CURRENT_LETTER, "dark blue", "black"),
+    (LetterStatus.CURRENT_LETTER, "black", "white"),
     (LetterStatus.CORRECT_CURRENT_WORD, "black", "dark green"),
     (LetterStatus.WRONG_CURRENT_WORD, "black", "dark red"),
-    (LetterStatus.DEFAULT_CURRENT_WORD, "light gray", "white"),
+    (LetterStatus.DEFAULT_CURRENT_WORD, "dark blue", "black"),
 ]
 
 
