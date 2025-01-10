@@ -22,12 +22,16 @@ TODO:
 - [x] print stats on game over;
 - [x] write a line wrapping logic, tie it to the screen dimension;
 - [ ] center all the gui elements;
+- [ ] check if using the plain Text widget for the entire word box is better;
+- [ ] restart button;
+- [x] add wpm to the stats;
 """
 import urwid
 import typing
 from functools import partial
 from enum import Enum
 from typing import Optional
+import time
 
 
 class LetterStatus(Enum):
@@ -111,25 +115,10 @@ def get_gui(word_box, input_field, button_inst) -> urwid.Widget:
 
 
 class GameOverException(Exception):
-    def __init__(self, word_mask, msg: str = "Game over", *args):
-        game_stats = self.get_stats_from_word_mask(word_mask)
-        msg += "\n" + "-"*10 + "\nStats:\n" + "\n".join([f"{k}={v}" for k, v in game_stats.items()])
+    def __init__(self, word_mask, start_time: Optional[float] = None, msg: str = "Game over", *args):
         super().__init__(msg, *args)
-
-    def get_stats_from_word_mask(self, word_mask) -> dict:
-        assert all([all([x is not None for x in wm]) for wm in word_mask])
-        n_chars = sum([len(wm) for wm in word_mask])
-        n_correct_chars = sum([len([x for x in wm if x]) for wm in word_mask])
-        n_words = len(word_mask)
-        n_correct_words = sum([all([x for x in wm]) for wm in word_mask])
-        return dict(
-            n_chars=n_chars,
-            n_correct_chars=n_correct_chars,
-            correct_chars_pct=round(100*n_correct_chars/n_chars, 0),
-            n_words=n_words,
-            n_correct_words=n_correct_words,
-            correct_words_pct=round(100*n_correct_words/n_words, 0),
-        )
+        self.word_mask = word_mask
+        self.start_time = start_time
 
 
 def get_colors(word_mask: list[list[Optional[bool]]], cursor_pos: tuple[int, int]) -> list[list[LetterStatus]]:
@@ -227,8 +216,8 @@ def update_word_mask(
 def main() -> None:
     from random import choice
     NUM_WORDS = 50
-    # WORDS = [choice(VOCAB) for _ in range(NUM_WORDS)]
-    WORDS = ["hi", "bye", "wee"]
+    WORDS = [choice(VOCAB) for _ in range(NUM_WORDS)]
+    # WORDS = ["hi", "bye", "wee"]
     # WORDS = ["aaaaaa", "bbbb"]
 
     def exit_on_q(key: str) -> None:
@@ -246,9 +235,14 @@ def main() -> None:
             word_mask=init_word_mask(words),
             typed_so_far="",
             colors=None,
+            game_start_time=None,
         )
         def on_input_change(_edit: urwid.Edit, new_edit_text: str, word_widget: urwid.Pile) -> None:
             """Redraw screen on user input."""
+            if app_state["game_start_time"] is None and app_state["cursor_pos"][0] == 0:
+                # we are at the beginning of the game -> start timer
+                app_state["game_start_time"] = time.time()
+
             if len(new_edit_text) == 0:
                 # this will happen when the _edit.edit_text is set to "" by the postchange event
                 app_state["typed_so_far"] = new_edit_text
@@ -256,6 +250,8 @@ def main() -> None:
                 new_cursor_pos = (x, -1)
                 app_state["cursor_pos"] = new_cursor_pos
 
+                # NOTE: this call wont raise the game over exception because this if branch does not
+                # advance the word_idx
                 new_word_mask = update_word_mask(words, app_state["word_mask"], new_cursor_pos, "")
                 app_state["word_mask"] = new_word_mask
 
@@ -290,7 +286,11 @@ def main() -> None:
             app_state["cursor_pos"] = new_cursor_pos
             app_state["typed_so_far"] = new_edit_text
 
-            new_word_mask = update_word_mask(words, app_state["word_mask"], new_cursor_pos, last_char)
+            try:
+                new_word_mask = update_word_mask(words, app_state["word_mask"], new_cursor_pos, last_char)
+            except GameOverException as e:
+                raise GameOverException(e.word_mask, app_state["game_start_time"])
+
             app_state["word_mask"] = new_word_mask
 
             new_colors = get_colors(new_word_mask, new_cursor_pos)
@@ -306,6 +306,21 @@ def main() -> None:
             # if the user presses space -> clear the edit field
             _edit.set_edit_text(u"")
 
+    def _get_stats_from_word_mask(word_mask) -> dict:
+        assert all([all([x is not None for x in wm]) for wm in word_mask])
+        n_chars = sum([len(wm) for wm in word_mask])
+        n_correct_chars = sum([len([x for x in wm if x]) for wm in word_mask])
+        n_words = len(word_mask)
+        n_correct_words = sum([all([x for x in wm]) for wm in word_mask])
+        return dict(
+            n_chars=n_chars,
+            n_correct_chars=n_correct_chars,
+            correct_chars_pct=round(100*n_correct_chars/n_chars, 0),
+            n_words=n_words,
+            n_correct_words=n_correct_words,
+            correct_words_pct=round(100*n_correct_words/n_words, 0),
+        )
+
     # init application loop
     # NOTE: need to do it before everything else to have access to the screen dimensions
     loop = urwid.MainLoop(None, PALETTE, unhandled_input=exit_on_q)
@@ -319,11 +334,12 @@ def main() -> None:
     word_widget = urwid.Pile(word_matrix)
     word_box = urwid.LineBox(word_widget)
     ## input field
-    input_field = urwid.Edit(("", "Please enter the word\n"), align='center')
+    input_field = urwid.Edit(("", ""), align='center')
+    input_field_box = urwid.LineBox(input_field)
     ## exit button
     button_inst = urwid.Button("Exit")
     ## top level widget
-    top = get_gui(word_box, input_field, button_inst)
+    top = get_gui(word_box, input_field_box, button_inst)
     app = urwid.LineBox(top)
 
     # events
@@ -339,7 +355,13 @@ def main() -> None:
     try:
         loop.run()
     except GameOverException as e:
-        print(str(e))
+        final_word_mask = e.word_mask
+        stats = _get_stats_from_word_mask(final_word_mask)
+        msg = "Game over\n" + "-"*10 + "\nStats:\n" + "\n".join([f"{k}={v}" for k, v in stats.items()])
+        # time average
+        wpm = round(60.0 * NUM_WORDS / (time.time() - e.start_time), 0)
+        msg += f"\nwpm={wpm}"
+        print(msg)
 
 
 if __name__ == "__main__":
