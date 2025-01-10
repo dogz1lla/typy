@@ -20,6 +20,8 @@ TODO:
 - [x] if not all chars are input and the word is advanced then convert all not typed to false;
 - [x] bug: when backspacing the cursor seem to not go all the way to the first letter;
 - [x] print stats on game over;
+- [x] write a line wrapping logic, tie it to the screen dimension;
+- [ ] center all the gui elements;
 """
 import urwid
 import typing
@@ -57,12 +59,6 @@ VOCAB = [
 ]
 
 
-def partition(lst, size):
-    # see https://favtutor.com/blogs/partition-list-python
-    for i in range(0, len(lst), size):
-        yield lst[i: i + size]
-
-
 def get_word_repr(word: str, letter_colors: list[str]) -> urwid.Columns:
     return [(1, urwid.Text((c, l))) for c, l in zip(letter_colors, word)]
 
@@ -83,9 +79,27 @@ def get_line_widget(words: list[str], color_map: list[list[str]]) -> urwid.Colum
     return urwid.Columns(line, dividechars=1)
 
 
-def get_word_matrix(words: list[str], color_map: list[list[str]]) -> list[urwid.Columns]:
-    l1 = list(partition(words, 3))
-    l2 = list(partition(color_map, 3))
+def wrap_lines(words, max_width: int):
+    wrapped_lines = list()
+    current_line_width = 0
+    current_line = list()
+    for word in words:
+        if len(word) + current_line_width < max_width:
+            current_line_width += 1 if current_line else 0  # space between words
+            current_line_width += len(word)
+            current_line.append(word)
+        else:
+            wrapped_lines.append(current_line)
+            current_line_width = len(word)
+            current_line = [word]
+    wrapped_lines.append(current_line)
+    return wrapped_lines
+
+
+def get_word_matrix(words: list[str], color_map: list[list[str]], box_dim: tuple[int, int] = (50, 10)) -> list[urwid.Columns]:
+    max_width, _ = box_dim
+    l1 = wrap_lines(words, max_width)
+    l2 = wrap_lines(color_map, max_width)
     return [get_line_widget(line, cm) for line, cm in zip(l1, l2)]
 
 
@@ -224,12 +238,12 @@ def main() -> None:
     def on_exit_clicked(_button: urwid.Button) -> typing.NoReturn:
         raise urwid.ExitMainLoop()
 
-    def on_input_change_closure():
+    def on_input_change_closure(words, screen_dim):
         app_state = dict(
             cursor_pos=(0, -1),
             last_valid_char="",
             last_char="",
-            word_mask=init_word_mask(WORDS),
+            word_mask=init_word_mask(words),
             typed_so_far="",
             colors=None,
         )
@@ -242,13 +256,13 @@ def main() -> None:
                 new_cursor_pos = (x, -1)
                 app_state["cursor_pos"] = new_cursor_pos
 
-                new_word_mask = update_word_mask(WORDS, app_state["word_mask"], new_cursor_pos, "")
+                new_word_mask = update_word_mask(words, app_state["word_mask"], new_cursor_pos, "")
                 app_state["word_mask"] = new_word_mask
 
                 new_colors = get_colors(new_word_mask, new_cursor_pos)
                 app_state["colors"] = new_colors
 
-                new_word_matrix = get_word_matrix(WORDS, new_colors)
+                new_word_matrix = get_word_matrix(words, new_colors, screen_dim)
                 word_widget.contents = [(w, word_widget.options()) for w in new_word_matrix]
                 return
 
@@ -276,13 +290,13 @@ def main() -> None:
             app_state["cursor_pos"] = new_cursor_pos
             app_state["typed_so_far"] = new_edit_text
 
-            new_word_mask = update_word_mask(WORDS, app_state["word_mask"], new_cursor_pos, last_char)
+            new_word_mask = update_word_mask(words, app_state["word_mask"], new_cursor_pos, last_char)
             app_state["word_mask"] = new_word_mask
 
             new_colors = get_colors(new_word_mask, new_cursor_pos)
             app_state["colors"] = new_colors
 
-            new_word_matrix = get_word_matrix(WORDS, new_colors)
+            new_word_matrix = get_word_matrix(words, new_colors, box_dim=screen_dim)
             word_widget.contents = [(w, word_widget.options()) for w in new_word_matrix]
             return
         return on_input_change
@@ -292,14 +306,20 @@ def main() -> None:
             # if the user presses space -> clear the edit field
             _edit.set_edit_text(u"")
 
+    # init application loop
+    # NOTE: need to do it before everything else to have access to the screen dimensions
+    loop = urwid.MainLoop(None, PALETTE, unhandled_input=exit_on_q)
+    screen_dim = loop.screen.get_cols_rows()
+    word_box_dim = (screen_dim[0] - 4, screen_dim[1])
+
     # widgets
     ## word box
     init_colors = get_colors(init_word_mask(WORDS), (0, -1))
-    word_matrix = get_word_matrix(WORDS, init_colors)
+    word_matrix = get_word_matrix(WORDS, init_colors, word_box_dim)
     word_widget = urwid.Pile(word_matrix)
     word_box = urwid.LineBox(word_widget)
     ## input field
-    input_field = urwid.Edit(("", "Please enter the word\n"))
+    input_field = urwid.Edit(("", "Please enter the word\n"), align='center')
     ## exit button
     button_inst = urwid.Button("Exit")
     ## top level widget
@@ -307,13 +327,15 @@ def main() -> None:
     app = urwid.LineBox(top)
 
     # events
-    on_input_change = on_input_change_closure()
+    on_input_change = on_input_change_closure(WORDS, word_box_dim)
     urwid.connect_signal(input_field, "change", partial(on_input_change, word_widget=word_widget))
     urwid.connect_signal(input_field, "postchange", clear_if_space)
     urwid.connect_signal(button_inst, "click", on_exit_clicked)
 
-    # application loop
-    loop = urwid.MainLoop(app, PALETTE, unhandled_input=exit_on_q)
+    # set the main widget for the application
+    loop.widget = app
+
+    # run application loop
     try:
         loop.run()
     except GameOverException as e:
