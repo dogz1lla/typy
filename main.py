@@ -21,7 +21,7 @@ TODO:
 - [x] bug: when backspacing the cursor seem to not go all the way to the first letter;
 - [x] print stats on game over;
 - [x] write a line wrapping logic, tie it to the screen dimension;
-- [ ] center all the gui elements;
+- [x] center all the gui elements;
 - [x] restart button;
 - [x] add wpm to the stats;
 - [x] print stats in an overlay widget;
@@ -55,6 +55,8 @@ PALETTE: list[tuple[str, str, str]] = [
     (LetterStatus.CORRECT_CURRENT_WORD, "black", "dark green"),
     (LetterStatus.WRONG_CURRENT_WORD, "black", "dark red"),
     (LetterStatus.DEFAULT_CURRENT_WORD, "dark blue", "black"),
+    # pop-up style
+    ("popbg", "dark red", "black"),
 ]
 
 
@@ -386,7 +388,7 @@ def main() -> None:
     ## exit button
     button_inst = urwid.Button("Exit")
     ## top level widget
-    top = get_gui(stats_widget, word_box, input_field_box, button_inst)
+    top = get_gui(urwid.Filler(urwid.Padding(stats_widget, urwid.CENTER, 25)), word_box, input_field_box, button_inst)
     app = urwid.LineBox(top)
 
     # events

@@ -41,22 +41,21 @@ class PopUpDialog(urwid.WidgetWrap):
             raise urwid.ExitMainLoop()
 
         # retry: go back to the game and play again
-        retry_button = urwid.Button("retry")
-        # urwid.connect_signal(retry_button, "click", lambda button: self._emit("close"))
+        retry_button = urwid.Button("Retry")
         urwid.connect_signal(retry_button, "click", on_retry_clicked)
 
         # exit: close the application
-        exit_button = urwid.Button("exit")
+        exit_button = urwid.Button("Exit")
         urwid.connect_signal(exit_button, "click", on_exit_clicked)
 
         pile = urwid.Pile(
             [
-                # urwid.Text(f"this is a popup, and this is info: {stats}\n"),
                 get_stats_widget(stats),
                 urwid.Columns([retry_button, exit_button]),
             ]
         )
         super().__init__(urwid.AttrMap(urwid.Filler(pile), "popbg"))
+        # super().__init__(urwid.AttrMap(centered, "popbg"))
 
 
 class WidgetWithGameOverPopup(urwid.PopUpLauncher):
@@ -79,10 +78,12 @@ class WidgetWithGameOverPopup(urwid.PopUpLauncher):
     def create_pop_up(self) -> PopUpDialog:
         pop_up = PopUpDialog(self.info, self.stats_widget)
         urwid.connect_signal(pop_up, "close", lambda button: self.close_pop_up())
-        return pop_up
+        centered = urwid.AttrMap(urwid.LineBox(urwid.Filler(urwid.Padding(pop_up, urwid.CENTER, 30))), "popbg")
+        # return pop_up
+        return centered
 
     def get_pop_up_parameters(self):
-        return {"left": 0, "top": 1, "overlay_width": 32, "overlay_height": 7}
+        return {"left": 0, "top": 1, "overlay_width": 130, "overlay_height": 15}
 
     def keypress(self, size: tuple[int], key: str) -> str | None:
         parsed = super().keypress(size, key)
@@ -94,23 +95,3 @@ class WidgetWithGameOverPopup(urwid.PopUpLauncher):
 # fill = urwid.Filler(urwid.Padding(ThingWithAPopUp(), urwid.CENTER, 15))
 # loop = urwid.MainLoop(fill, [("popbg", "white", "dark blue")], pop_ups=True)
 # loop.run()
-
-# class ThingWithAPopUp(urwid.PopUpLauncher):
-#     def __init__(self) -> None:
-#         super().__init__(urwid.Button("click-me"))
-#         urwid.connect_signal(self.original_widget, "click", lambda button: self.open_pop_up())
-
-#     def create_pop_up(self) -> PopUpDialog:
-#         pop_up = PopUpDialog()
-#         urwid.connect_signal(pop_up, "close", lambda button: self.close_pop_up())
-#         return pop_up
-
-#     def get_pop_up_parameters(self):
-#         return {"left": 0, "top": 1, "overlay_width": 32, "overlay_height": 7}
-
-#     def keypress(self, size: tuple[int], key: str) -> str | None:
-#         parsed = super().keypress(size, key)
-#         if parsed in {"q", "Q"}:
-#             raise urwid.ExitMainLoop("Done")
-#         return parsed
-
