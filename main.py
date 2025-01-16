@@ -33,6 +33,7 @@ from functools import partial
 from enum import Enum
 from typing import Optional
 import time
+import argparse
 
 from popup import WidgetWithGameOverPopup
 
@@ -240,7 +241,10 @@ def get_stats_widget(stats: dict = {}) -> urwid.Pile:
     return urwid.Pile([char_stats, word_stats, wpm])
 
 
-def main() -> None:
+def main(num_words: int) -> None:
+    NUM_WORDS = num_words
+    WORDS = get_word_list(NUM_WORDS)
+
     def get_word_list(n: int) -> list[str]:
         from random import choice
         return [choice(VOCAB) for _ in range(n)]
@@ -360,9 +364,6 @@ def main() -> None:
             correct_words_pct=int(round(100*n_correct_words/n_words, 0)),
         )
 
-    NUM_WORDS = 5
-    WORDS = get_word_list(NUM_WORDS)
-
     # init application loop
     # NOTE: need to do it before everything else to have access to the screen dimensions
     loop = urwid.MainLoop(None, PALETTE, unhandled_input=exit_on_q, pop_ups=True)
@@ -405,4 +406,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        prog='TyPy',
+        description='Command line typing training',
+        epilog='Have fun typing!',
+    )
+    parser.add_argument('-n', '--numwords', help="Number of words") 
+    args = parser.parse_args()
+    main(args["num_words"])
