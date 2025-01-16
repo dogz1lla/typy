@@ -25,7 +25,7 @@ TODO:
 - [x] restart button;
 - [x] add wpm to the stats;
 - [x] print stats in an overlay widget;
-- [ ] add argparse for at least number of words;
+- [x] add argparse for at least number of words;
 """
 import urwid
 import typing
@@ -242,14 +242,14 @@ def get_stats_widget(stats: dict = {}) -> urwid.Pile:
 
 
 def main(num_words: int) -> None:
-    NUM_WORDS = num_words
-    WORDS = get_word_list(NUM_WORDS)
-
     def get_word_list(n: int) -> list[str]:
         from random import choice
         return [choice(VOCAB) for _ in range(n)]
         # return ["hi", "bye", "wee"]
         # return ["aaaaaa", "bbbb"]
+
+    NUM_WORDS = num_words
+    WORDS = get_word_list(NUM_WORDS)
 
     def exit_on_q(key: str) -> None:
         if key in {"q", "Q"}:
@@ -411,6 +411,9 @@ if __name__ == "__main__":
         description='Command line typing training',
         epilog='Have fun typing!',
     )
-    parser.add_argument('-n', '--numwords', help="Number of words") 
+    parser.add_argument('-n', '--numwords', help="Number of words", required=True, type=int) 
     args = parser.parse_args()
-    main(args["num_words"])
+    if args.numwords > 50:
+        import sys
+        sys.exit(f"Number of words can not exceed 50 ({args.numwords} given). Yes, code is slow af.")
+    main(args.numwords)
