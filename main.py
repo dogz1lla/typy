@@ -21,10 +21,11 @@ TODO:
 - [x] bug: when backspacing the cursor seem to not go all the way to the first letter;
 - [x] print stats on game over;
 - [x] write a line wrapping logic, tie it to the screen dimension;
-- [ ] center all the gui elements;
-- [ ] restart button;
+- [x] center all the gui elements;
+- [x] restart button;
 - [x] add wpm to the stats;
-- [ ] print stats in an overlay widget;
+- [x] print stats in an overlay widget;
+- [x] add argparse for at least number of words;
 """
 import urwid
 import typing
@@ -32,6 +33,9 @@ from functools import partial
 from enum import Enum
 from typing import Optional
 import time
+import argparse
+
+from popup import WidgetWithGameOverPopup
 
 
 class LetterStatus(Enum):
@@ -52,6 +56,8 @@ PALETTE: list[tuple[str, str, str]] = [
     (LetterStatus.CORRECT_CURRENT_WORD, "black", "dark green"),
     (LetterStatus.WRONG_CURRENT_WORD, "black", "dark red"),
     (LetterStatus.DEFAULT_CURRENT_WORD, "dark blue", "black"),
+    # pop-up style
+    ("popbg", "dark red", "black"),
 ]
 
 
@@ -235,12 +241,15 @@ def get_stats_widget(stats: dict = {}) -> urwid.Pile:
     return urwid.Pile([char_stats, word_stats, wpm])
 
 
-def main() -> None:
+def main(num_words: int) -> None:
     def get_word_list(n: int) -> list[str]:
         from random import choice
         return [choice(VOCAB) for _ in range(n)]
         # return ["hi", "bye", "wee"]
         # return ["aaaaaa", "bbbb"]
+
+    NUM_WORDS = num_words
+    WORDS = get_word_list(NUM_WORDS)
 
     def exit_on_q(key: str) -> None:
         if key in {"q", "Q"}:
@@ -250,14 +259,6 @@ def main() -> None:
         raise urwid.ExitMainLoop()
 
     def on_input_change_closure(words, screen_dim):
-        # app_state = dict(
-        #     cursor_pos=(0, -1),
-        #     word_mask=init_word_mask(words),
-        #     typed_so_far="",
-        #     colors=None,
-        #     game_start_time=None,
-        # )
-
         def _clean_state(state: dict, word_list: Optional[list[str]] = None) -> dict:
             state["cursor_pos"] = (0, -1)
             state["words"] = word_list or words
@@ -270,8 +271,10 @@ def main() -> None:
         _clean_state(app_state)
 
         def on_input_change(_edit: urwid.Edit, new_edit_text: str, word_widget: urwid.Pile, stats_widget: urwid.Pile) -> None:
-            """Redraw screen on user input."""
-            if app_state["game_start_time"] is None and app_state["cursor_pos"][0] == 0:
+            """Redraw dynamically updated widgets on user input."""
+
+            # if app_state["game_start_time"] is None and app_state["cursor_pos"][0] == 0:
+            if app_state["game_start_time"] is None and app_state["cursor_pos"][0] == 0 and app_state["cursor_pos"][1] > -1:
                 # we are at the beginning of the game -> start timer
                 app_state["game_start_time"] = time.time()
 
@@ -321,13 +324,13 @@ def main() -> None:
             try:
                 new_word_mask = update_word_mask(app_state["words"], app_state["word_mask"], new_cursor_pos, last_char)
             except GameOverException as e:
-                # raise GameOverException(e.word_mask, app_state["game_start_time"])
+                elapsed_time = time.time() - app_state["game_start_time"]
                 final_word_mask = e.word_mask
                 stats = _get_stats_from_word_mask(final_word_mask)
-                wpm = int(round(60.0 * NUM_WORDS / (time.time() - app_state["game_start_time"]), 0))
+                wpm = int(round(60.0 * NUM_WORDS / elapsed_time, 0))
                 stats["wpm"] = wpm
-                stats_widget.contents = [(get_stats_widget(stats), stats_widget.options())]
                 new_words = get_word_list(len(app_state["words"]))
+                urwid.emit_signal(word_widget, "gameover", word_widget, stats, stats_widget)
                 _clean_state(app_state, new_words)
                 return
 
@@ -361,12 +364,9 @@ def main() -> None:
             correct_words_pct=int(round(100*n_correct_words/n_words, 0)),
         )
 
-    NUM_WORDS = 5
-    WORDS = get_word_list(NUM_WORDS)
-
     # init application loop
     # NOTE: need to do it before everything else to have access to the screen dimensions
-    loop = urwid.MainLoop(None, PALETTE, unhandled_input=exit_on_q)
+    loop = urwid.MainLoop(None, PALETTE, unhandled_input=exit_on_q, pop_ups=True)
     screen_dim = loop.screen.get_cols_rows()
     word_box_dim = (screen_dim[0] - 4, screen_dim[1])
 
@@ -377,14 +377,19 @@ def main() -> None:
     init_colors = get_colors(init_word_mask(WORDS), (0, -1))
     word_matrix = get_word_matrix(WORDS, init_colors, word_box_dim)
     word_widget = urwid.Pile(word_matrix)
-    word_box = urwid.LineBox(word_widget)
+
+    ### augment the word widget Pile with a game over popup
+    urwid.register_signal(urwid.Pile, ["gameover"])
+    word_widget_with_popup = WidgetWithGameOverPopup(word_widget)
+
+    word_box = urwid.LineBox(word_widget_with_popup)
     ## input field
     input_field = urwid.Edit(("", ""), align='center')
     input_field_box = urwid.LineBox(input_field)
     ## exit button
     button_inst = urwid.Button("Exit")
     ## top level widget
-    top = get_gui(stats_widget, word_box, input_field_box, button_inst)
+    top = get_gui(urwid.Filler(urwid.Padding(stats_widget, urwid.CENTER, 25)), word_box, input_field_box, button_inst)
     app = urwid.LineBox(top)
 
     # events
@@ -401,4 +406,14 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        prog='TyPy',
+        description='Command line typing training',
+        epilog='Have fun typing!',
+    )
+    parser.add_argument('-n', '--numwords', help="Number of words", required=True, type=int) 
+    args = parser.parse_args()
+    if args.numwords > 50:
+        import sys
+        sys.exit(f"Number of words can not exceed 50 ({args.numwords} given). Yes, code is slow af.")
+    main(args.numwords)
